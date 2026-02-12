@@ -1,0 +1,51 @@
+{
+  "name": "Chao - File API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chao-files",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "webhook-in",
+      "name": "Webhook",
+      "webhookId": "chao-files"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst action = body.action;\nconst key = body.key || '';\nconst value = body.value || '';\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.store) staticData.store = {};\n\ntry {\n  if (action === 'write') {\n    staticData.store[key] = value;\n    return [{ json: { success: true, result: 'OK' } }];\n  } else if (action === 'read') {\n    const data = staticData.store[key];\n    if (data !== undefined) {\n      return [{ json: { success: true, result: data } }];\n    } else {\n      return [{ json: { success: false, error: 'Key not found' } }];\n    }\n  } else if (action === 'list') {\n    const keys = Object.keys(staticData.store).filter(k => k.startsWith(key));\n    return [{ json: { success: true, result: keys } }];\n  } else if (action === 'delete') {\n    delete staticData.store[key];\n    return [{ json: { success: true, result: 'Deleted' } }];\n  } else {\n    return [{ json: { success: false, error: 'Unknown action. Use: write, read, list, delete' } }];\n  }\n} catch (err) {\n  return [{ json: { success: false, error: err.message } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "id": "store-handler",
+      "name": "Data Store"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 0],
+      "id": "respond",
+      "name": "Respond"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Data Store", "type": "main", "index": 0 }]]
+    },
+    "Data Store": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
