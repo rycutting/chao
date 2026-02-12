@@ -1,0 +1,178 @@
+{
+  "name": "Chao - Telegram Claude Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message", "callback_query"],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "webhookId": "chao-telegram-trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "L3EZ6B16Neo5QPbZ",
+          "name": "Telegram - Chao Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\n// Initialize storage\nif (!staticData.projects) {\n  staticData.projects = {\n    'general': {\n      name: 'General',\n      description: 'Default general conversation',\n      context: '',\n      systemPrompt: ''\n    },\n    'n8n-setup': {\n      name: 'n8n Setup',\n      description: 'VPS, Tailscale, n8n instance setup and workflow development',\n      context: 'Ryan is setting up n8n on a Hostinger VPS (srv1363974.hstgr.cloud). Connected via Tailscale (VPS: 100.87.167.74, Workstation: 100.95.230.36). n8n URL: https://n8n.srv1363974.hstgr.cloud. Deployed so far: Chao Telegram bot, File API for persistent key-value storage. Using Claude Sonnet 4.5 via direct HTTP to Anthropic API. Future plans: day trading agent for NinjaTrader, importing ChatGPT history, specialized bots.',\n      systemPrompt: ''\n    }\n  };\n}\nif (!staticData.conversations) staticData.conversations = {};\nif (!staticData.userProjects) staticData.userProjects = {};\nif (!staticData.userState) staticData.userState = {};\nif (!staticData.lastActivity) staticData.lastActivity = {};\n\n// Determine update type\nconst isCallback = !!input.callback_query;\nconst message = isCallback ? null : input.message;\nconst chatId = isCallback\n  ? String(input.callback_query.message.chat.id)\n  : String(message.chat.id);\nconst messageText = message ? (message.text || '') : '';\n\n// Helper: build direct response\nfunction directReply(text, replyMarkup) {\n  const body = { chat_id: chatId, text: text };\n  if (replyMarkup) body.reply_markup = replyMarkup;\n  return [{ json: { action: 'direct', telegramBody: JSON.stringify(body) } }];\n}\n\n// ===== COMMANDS =====\n\n// /close - revert to general\nif (messageText === '/close') {\n  const prev = staticData.userProjects[chatId] || 'general';\n  staticData.userProjects[chatId] = 'general';\n  delete staticData.lastActivity[chatId];\n  delete staticData.userState[chatId];\n  if (prev === 'general') {\n    return directReply('You are already in General.');\n  }\n  const prevName = staticData.projects[prev] ? staticData.projects[prev].name : prev;\n  return directReply('Closed project: ' + prevName + '\\nBack to General.\\n\\nSend /projects to switch to another project.');\n}\n\n// /projects or /start - show project selection\nif (messageText === '/projects' || messageText === '/start') {\n  const projectKeys = Object.keys(staticData.projects).filter(k => k !== 'general');\n  const currentProject = staticData.userProjects[chatId] || 'general';\n\n  const keyboard = projectKeys.map(key => [{\n    text: (key === currentProject ? '>> ' : '') + staticData.projects[key].name,\n    callback_data: 'project:' + key\n  }]);\n  keyboard.push([{ text: '+ New Project', callback_data: 'action:new_project' }]);\n\n  const statusText = currentProject === 'general'\n    ? 'You are in General (default).'\n    : 'Current project: ' + (staticData.projects[currentProject] ? staticData.projects[currentProject].name : currentProject);\n\n  return directReply(statusText + '\\n\\nSelect a project:', { inline_keyboard: keyboard });\n}\n\n// /status - show current state\nif (messageText === '/status') {\n  const cp = staticData.userProjects[chatId] || 'general';\n  const proj = staticData.projects[cp];\n  const convLen = (staticData.conversations[cp] || []).length;\n  const allProjects = Object.keys(staticData.projects).filter(k => k !== 'general').map(k => staticData.projects[k].name).join(', ');\n  return directReply(\n    'Current: ' + (proj ? proj.name : cp) +\n    '\\nMessages: ' + convLen +\n    '\\nProjects: ' + (allProjects || '(none)') +\n    '\\n\\nCommands: /projects /close /status'\n  );\n}\n\n// ===== CALLBACK QUERIES =====\n\nif (isCallback) {\n  const callbackData = input.callback_query.data || '';\n\n  // Project selection\n  if (callbackData.startsWith('project:')) {\n    const projectKey = callbackData.replace('project:', '');\n    const project = staticData.projects[projectKey];\n    if (!project) return directReply('Project not found.');\n    staticData.userProjects[chatId] = projectKey;\n    staticData.lastActivity[chatId] = Date.now();\n    delete staticData.userState[chatId];\n    return directReply('Switched to: ' + project.name + '\\n\\nI have full context for this project. Ask me anything!\\n\\nSend /close when done to return to General.');\n  }\n\n  // New project\n  if (callbackData === 'action:new_project') {\n    staticData.userState[chatId] = { action: 'awaiting_project_name' };\n    return directReply('What would you like to name the new project?');\n  }\n\n  return directReply('Unknown action. Send /projects to select a project.');\n}\n\n// ===== PENDING STATE: awaiting project name =====\n\nif (staticData.userState[chatId] && staticData.userState[chatId].action === 'awaiting_project_name') {\n  const projectName = messageText.trim();\n  if (!projectName || projectName.startsWith('/')) {\n    delete staticData.userState[chatId];\n    return directReply('Cancelled. Send /projects to try again.');\n  }\n  const projectKey = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');\n\n  if (staticData.projects[projectKey]) {\n    delete staticData.userState[chatId];\n    staticData.userProjects[chatId] = projectKey;\n    staticData.lastActivity[chatId] = Date.now();\n    return directReply('Project \"' + staticData.projects[projectKey].name + '\" already exists. Switched to it!\\n\\nSend /close when done.');\n  }\n\n  staticData.projects[projectKey] = {\n    name: projectName,\n    description: '',\n    context: '',\n    systemPrompt: ''\n  };\n  staticData.conversations[projectKey] = [];\n  staticData.userProjects[chatId] = projectKey;\n  staticData.lastActivity[chatId] = Date.now();\n  delete staticData.userState[chatId];\n\n  return directReply('Created project: ' + projectName + '\\nSwitched to it. How can I help?\\n\\nSend /close when done to return to General.');\n}\n\n// ===== SESSION TIMEOUT CHECK =====\n\nlet sessionReverted = null;\nconst currentProject = staticData.userProjects[chatId] || 'general';\n\nif (currentProject !== 'general') {\n  const lastTime = staticData.lastActivity[chatId];\n  const now = Date.now();\n  const TWO_HOURS = 2 * 60 * 60 * 1000;\n\n  if (!lastTime || (now - lastTime) > TWO_HOURS) {\n    const prevName = staticData.projects[currentProject] ? staticData.projects[currentProject].name : currentProject;\n    staticData.userProjects[chatId] = 'general';\n    delete staticData.lastActivity[chatId];\n    sessionReverted = prevName;\n  }\n}\n\n// Update last activity\nstaticData.lastActivity[chatId] = Date.now();\n\n// ===== REGULAR MESSAGE - NEEDS CLAUDE =====\n\nconst activeProject = staticData.userProjects[chatId] || 'general';\nconst project = staticData.projects[activeProject] || { name: 'General', context: '', systemPrompt: '' };\n\n// Load conversation history (last 20 exchanges)\nif (!staticData.conversations[activeProject]) staticData.conversations[activeProject] = [];\nconst history = staticData.conversations[activeProject].slice(-40);\n\n// Build system prompt\nlet systemPrompt = 'You are Chao, Ryan\\'s all-knowing AI meta-assistant, accessible via Telegram. Be conversational, clear, and concise. Keep responses concise for mobile reading but be thorough when the topic requires it. You have access to project context and conversation history. You can help with anything: coding, brainstorming, research, problem-solving, or casual conversation.';\n\nif (activeProject !== 'general' && project.context) {\n  systemPrompt += '\\n\\nCurrent project: ' + project.name + '\\nProject context:\\n' + project.context;\n}\n\nif (project.systemPrompt) {\n  systemPrompt += '\\n\\n' + project.systemPrompt;\n}\n\nif (sessionReverted) {\n  systemPrompt += '\\n\\nIMPORTANT: The user was previously in project \"' + sessionReverted + '\" but has been idle for over 2 hours. They have been automatically switched back to General. Briefly mention this at the start of your response and let them know they can send /projects to switch back.';\n}\n\n// Build messages array with history\nconst messages = [];\nfor (const entry of history) {\n  messages.push({ role: entry.role, content: entry.content });\n}\nmessages.push({ role: 'user', content: messageText });\n\nreturn [{\n  json: {\n    action: 'claude',\n    chatId: chatId,\n    messageText: messageText,\n    currentProject: activeProject,\n    claudeBody: JSON.stringify({\n      model: 'claude-sonnet-4-5-20250929',\n      max_tokens: 4096,\n      system: systemPrompt,\n      messages: messages\n    })\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "id": "router",
+      "name": "Router"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "check-action",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "claude",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0],
+      "id": "if-needs-claude",
+      "name": "Needs Claude?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.claudeBody }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -100],
+      "id": "call-claude",
+      "name": "Call Claude"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const claudeResponse = $input.first().json;\nconst routerData = $('Router').first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nconst responseText = claudeResponse.content[0].text;\nconst currentProject = routerData.currentProject;\nconst messageText = routerData.messageText;\nconst chatId = routerData.chatId;\n\n// Save conversation\nif (!staticData.conversations) staticData.conversations = {};\nif (!staticData.conversations[currentProject]) staticData.conversations[currentProject] = [];\n\nstaticData.conversations[currentProject].push(\n  { role: 'user', content: messageText, timestamp: new Date().toISOString() },\n  { role: 'assistant', content: responseText, timestamp: new Date().toISOString() }\n);\n\n// Keep only last 100 messages (50 exchanges)\nif (staticData.conversations[currentProject].length > 100) {\n  staticData.conversations[currentProject] = staticData.conversations[currentProject].slice(-100);\n}\n\n// Truncate if too long for Telegram (4096 char limit)\nlet telegramText = responseText;\nif (telegramText.length > 4000) {\n  telegramText = telegramText.substring(0, 3997) + '...';\n}\n\nreturn [{\n  json: {\n    telegramBody: JSON.stringify({\n      chat_id: chatId,\n      text: telegramText\n    })\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -100],
+      "id": "save-respond",
+      "name": "Save & Respond"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8580689753:AAG7afri9iS8rthp2AemzcU9sLy7DStWSZM/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.telegramBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -100],
+      "id": "send-claude-reply",
+      "name": "Send Claude Reply"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8580689753:AAG7afri9iS8rthp2AemzcU9sLy7DStWSZM/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.telegramBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 120],
+      "id": "send-direct-reply",
+      "name": "Send Direct Reply"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Router", "type": "main", "index": 0 }]]
+    },
+    "Router": {
+      "main": [[{ "node": "Needs Claude?", "type": "main", "index": 0 }]]
+    },
+    "Needs Claude?": {
+      "main": [
+        [{ "node": "Call Claude", "type": "main", "index": 0 }],
+        [{ "node": "Send Direct Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call Claude": {
+      "main": [[{ "node": "Save & Respond", "type": "main", "index": 0 }]]
+    },
+    "Save & Respond": {
+      "main": [[{ "node": "Send Claude Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
