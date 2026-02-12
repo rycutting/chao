@@ -11,9 +11,16 @@
 #   chao-bridge.sh dump                   Dump all static data (raw)
 #   chao-bridge.sh get-field <field>      Get a top-level field from static data
 
-N8N_API="https://n8n.srv1363974.hstgr.cloud/api/v1"
-N8N_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlYWQ5MmZlMi1hMWZjLTQ1ZGQtYWZhNS05NGI3ZDZiMWY5ZmEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiNjhlYTg5ODgtZWY5Mi00MmViLTg1YTQtNjg1NTAzOGFlOTA3IiwiaWF0IjoxNzcwOTE1NDA3fQ.YhTe92pbexQ6N_yW9HPapIdSU5lgyfo0S1SDwWqgLy4"
+N8N_API="${N8N_API:-https://n8n.srv1363974.hstgr.cloud/api/v1}"
+N8N_KEY="${N8N_API_KEY:-}"
 WORKFLOW_ID="YEugdBF6miKsMD77"
+
+if [ -z "$N8N_KEY" ]; then
+  echo "Error: N8N_API_KEY is not set." >&2
+  echo "Export it first, for example:" >&2
+  echo "  export N8N_API_KEY='your_n8n_api_key'" >&2
+  exit 1
+fi
 
 # Fetch the workflow's static data (unwraps the 'global' key)
 get_static_data() {
@@ -34,19 +41,21 @@ else:
 
 # Update the workflow's static data (GET-modify-PUT)
 put_static_data() {
-  local NEW_SD="$1"
+  local NEW_SD_JSON="$1"
 
   # Get full workflow first
   local FULL_WF
   FULL_WF=$(curl -s "${N8N_API}/workflows/${WORKFLOW_ID}" \
     -H "X-N8N-API-KEY: ${N8N_KEY}")
 
-  # Build update payload: wrap static data back in 'global' key
+  # Build update payload: wrap static data back in 'global' key using Python
   local PAYLOAD
-  PAYLOAD=$(echo "$FULL_WF" | python3 -c "
+  PAYLOAD=$(python3 -c "
 import sys, json
-wf = json.load(sys.stdin)
-new_sd = json.loads('''${NEW_SD}''')
+wf_json = '''$FULL_WF'''
+new_sd_json = '''$NEW_SD_JSON'''
+wf = json.loads(wf_json)
+new_sd = json.loads(new_sd_json)
 update = {
     'name': wf['name'],
     'nodes': wf['nodes'],
@@ -55,7 +64,8 @@ update = {
     'staticData': {'global': new_sd}
 }
 print(json.dumps(update))
-")
+"
+  )
 
   curl -s -X PUT "${N8N_API}/workflows/${WORKFLOW_ID}" \
     -H "X-N8N-API-KEY: ${N8N_KEY}" \

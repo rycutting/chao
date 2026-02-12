@@ -1,0 +1,102 @@
+{
+  "name": "Chao - Telegram Claude Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "webhookId": "chao-telegram-trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "L3EZ6B16Neo5QPbZ",
+          "name": "Telegram - Chao Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 4096, system: 'You are Chao, a helpful and knowledgeable AI assistant. You are chatting with Ryan via Telegram. Be conversational, clear, and concise. You can help with anything — coding, brainstorming, research, problem-solving, or just casual conversation. Keep responses reasonably concise for mobile reading, but be thorough when the topic requires it.', messages: [{ role: 'user', content: $json.message.text }] }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "id": "claude-api",
+      "name": "Call Claude API"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.content[0].text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [440, 0],
+      "id": "telegram-send",
+      "name": "Send Response",
+      "credentials": {
+        "telegramApi": {
+          "id": "L3EZ6B16Neo5QPbZ",
+          "name": "Telegram - Chao Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Call Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude API": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

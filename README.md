@@ -1,13 +1,17 @@
 # Chao
 
 Chao is a Telegram-based AI meta-assistant (`@Chao23Bot`) that acts as a central hub across projects.  
-This repository contains workflow definitions, storage API contract examples, and sync utilities used to keep context aligned between Telegram, n8n, and Claude.
+This repository contains n8n workflows, bridge tooling, and durable knowledge artifacts that keep context aligned between Telegram, n8n, and Claude Code.
 
 ## What This Repo Contains
 
 - `workflows/chao-telegram-bot-v2.json`: Main Telegram agent workflow
-- `workflows/file-api.json`: Key-value File API workflow used for storage
-- `scripts/sync-projects.sh`: Utility script for syncing project context
+- `workflows/chao-telegram-bot-v1-archive.json`: Archived v1 workflow snapshot
+- `workflows/file-api.json`: Secondary key-value File API workflow
+- `scripts/chao-bridge.sh`: Bridge between Claude Code and bot static data via n8n API
+- `scripts/sync-projects.sh`: Legacy sync utility (File API based)
+- `SKILLS.md`: Chao identity and behavior charter
+- `knowledge/`: Reusable topic knowledge folders (shared with other bots)
 - `projects/`: Local project context backups
 - `conversations/`: Local conversation backups
 - `docs/`: Supporting documentation
@@ -18,7 +22,8 @@ This repository contains workflow definitions, storage API contract examples, an
 - Interface: Telegram bot (`@Chao23Bot`)
 - Orchestration: n8n workflows
 - Model backend: Anthropic Claude (via HTTP in workflow nodes)
-- Storage: n8n workflow static data exposed through a File API webhook
+- Primary storage: Bot workflow static data (`$getWorkflowStaticData('global')`)
+- Secondary storage: File API webhook workflow (`/webhook/chao-files`)
 
 ## File API
 
@@ -51,6 +56,18 @@ Example payloads:
 
 ```json
 {"action":"delete","key":"project:old-project"}
+```
+
+## Bridge Workflow Access
+
+Common bridge commands:
+
+```bash
+export N8N_API_KEY="your_n8n_api_key"
+scripts/chao-bridge.sh list-projects
+scripts/chao-bridge.sh read-conv general
+echo "Context update" | scripts/chao-bridge.sh push-context my-project
+scripts/chao-bridge.sh add-project my-project "My Project"
 ```
 
 ## Storage Keys
