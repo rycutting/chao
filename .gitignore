@@ -12,6 +12,13 @@ target/
 # env/secrets
 .env
 .env.*
+.secrets.json
+
+# python cache
+__pycache__/
+
+# test artifacts
+test_tools/
 
 # editor/OS files
 .DS_Store
